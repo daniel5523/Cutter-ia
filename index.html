@@ -1,0 +1,230 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI Cutter — Web</title>
+<meta name="description" content="Detecta os melhores momentos do seu vídeo (picos de áudio e cenas agitadas) e gera cortes prontos, direto no navegador.">
+<link rel="icon" href="favicon.ico">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <span class="brand-mark">✂</span>
+    <span class="brand-name">AI Cutter</span>
+    <span class="brand-tag">web</span>
+  </div>
+  <a class="topbar-link" href="https://github.com/" target="_blank" rel="noopener">código no GitHub</a>
+</header>
+
+<main>
+
+  <!-- HERO: assinatura visual = o próprio motor de detecção, à mostra -->
+  <section class="hero">
+    <div class="hero-copy">
+      <p class="eyebrow">detector de melhores momentos · 100% no navegador</p>
+      <h1>Seu vídeo tem os cortes.<br>Isso aqui só acha eles.</h1>
+      <p class="hero-sub">
+        Sobe um VOD, o AI Cutter escuta os picos de áudio e observa a agitação
+        de cena — igual ao motor original em Python — e te devolve uma lista
+        de cortes prontos pra baixar. Nada sai do seu computador.
+      </p>
+    </div>
+    <div class="hero-scope">
+      <canvas id="waveform" width="640" height="220"></canvas>
+      <div class="hero-scope-labels">
+        <span><i class="dot dot-audio"></i> pico de áudio</span>
+        <span><i class="dot dot-cena"></i> cena agitada</span>
+        <span><i class="dot dot-chat"></i> pico de chat</span>
+        <span><i class="dot dot-viral"></i> corte viral</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- SELETOR DE MODO -->
+  <div class="mode-switch">
+    <button class="mode-btn active" id="btnModoArquivo" type="button">📁 Vídeo (arquivo)</button>
+    <button class="mode-btn" id="btnModoLive" type="button">🔴 Live (URL)</button>
+  </div>
+
+  <!-- LIVE -->
+  <section class="panel" id="painelLive" hidden>
+    <h2 class="panel-title">Vincular uma live</h2>
+    <p class="panel-sub">
+      Cola a URL de um stream <b>HLS (.m3u8)</b> — o AI Cutter assiste ao vivo,
+      no seu navegador, e vai gerando os cortes automaticamente conforme
+      detecta picos de áudio, cena agitada <b>ou explosão de mensagens no chat</b>.
+    </p>
+
+    <div class="live-input-row">
+      <input type="text" id="inputUrlLive" placeholder="https://.../live/index.m3u8 (link direto da playlist, não a página do canal)" autocomplete="off">
+      <button class="btn btn-primary" id="btnVincularLive" type="button">Vincular live</button>
+    </div>
+
+    <div class="live-chat-row">
+      <select id="chatPlataforma">
+        <option value="none">Sem chat (só áudio + cena)</option>
+        <option value="twitch">Twitch</option>
+        <option value="kick">Kick (beta)</option>
+      </select>
+      <input type="text" id="inputCanalChat" placeholder="nome do canal, ex: gaules" autocomplete="off">
+    </div>
+    <p class="panel-sub chat-hint">
+      Opcional: liga o chat como terceiro detector. Twitch funciona de forma anônima (sem login).
+      Kick é experimental e pode falhar dependendo da origem. YouTube não é suportado aqui —
+      a API de chat ao vivo exige chave de API e cota, então fica de fora do modo 100%-no-navegador.
+    </p>
+    <p class="live-warning" id="liveWarning" hidden></p>
+
+    <div class="live-monitor" id="liveMonitor" hidden>
+      <div class="live-video-wrap">
+        <video id="videoLive" muted playsinline autoplay></video>
+        <span class="live-pill" id="livePill"><i class="live-dot"></i> monitorando</span>
+      </div>
+      <div class="live-side">
+        <div class="live-meter">
+          <span class="live-meter-label">🎧 áudio</span>
+          <div class="live-meter-track"><div class="live-meter-fill" id="meterAudio"></div></div>
+        </div>
+        <div class="live-meter">
+          <span class="live-meter-label">🎬 cena</span>
+          <div class="live-meter-track"><div class="live-meter-fill" id="meterCena"></div></div>
+        </div>
+        <div class="live-meter">
+          <span class="live-meter-label">💬 chat</span>
+          <div class="live-meter-track"><div class="live-meter-fill" id="meterChat"></div></div>
+        </div>
+        <div class="log" id="logLive"></div>
+        <button class="btn btn-ghost" id="btnPararLive" type="button">Parar monitoramento</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- Cortes capturados ao vivo (vão aparecendo em tempo real) -->
+  <section class="panel" id="painelResultadosLive" hidden>
+    <div class="results-header">
+      <h2 class="panel-title">Cortes capturados ao vivo</h2>
+      <span class="results-count" id="resultsCountLive">0 cortes</span>
+    </div>
+    <div class="results-grid" id="resultsGridLive"></div>
+  </section>
+
+  <!-- UPLOAD -->
+  <section class="panel" id="painelUpload">
+    <div class="dropzone" id="dropzone" tabindex="0" role="button" aria-label="Selecionar vídeo">
+      <input type="file" id="inputArquivo" accept="video/*" hidden>
+      <div class="dropzone-inner">
+        <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+          <path d="M12 16V4M12 4l-4 4M12 4l4 4" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M4 16v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        <p class="dropzone-title">Arraste um vídeo aqui ou clique pra escolher</p>
+        <p class="dropzone-sub">MP4, WebM, MOV — fica salvo só no seu navegador, nunca é enviado a nenhum servidor</p>
+      </div>
+    </div>
+
+    <div class="preview" id="preview" hidden>
+      <video id="videoPreview" controls playsinline></video>
+      <div class="preview-info">
+        <p class="preview-name" id="previewNome">—</p>
+        <p class="preview-meta" id="previewMeta">—</p>
+        <button class="btn btn-ghost" id="btnTrocarVideo" type="button">Trocar vídeo</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- CONFIG -->
+  <section class="panel" id="painelConfig" hidden>
+    <h2 class="panel-title">Ajustes de detecção</h2>
+    <p class="panel-sub">Os mesmos parâmetros do motor original — mexe se quiser mais ou menos cortes.</p>
+
+    <div class="config-grid">
+      <label class="config-item">
+        <span class="config-label">Sensibilidade de áudio <em>(picos acima da média)</em></span>
+        <input type="range" id="cfgSensibilidade" min="1.2" max="3.5" step="0.1" value="2.2">
+        <span class="config-value" id="valSensibilidade">2.2×</span>
+      </label>
+
+      <label class="config-item">
+        <span class="config-label">Agitação de cena mínima</span>
+        <input type="range" id="cfgLimiarCena" min="0.15" max="0.6" step="0.05" value="0.35">
+        <span class="config-value" id="valLimiarCena">0.35</span>
+      </label>
+
+      <label class="config-item">
+        <span class="config-label">Cortes de cena para considerar "agitado"</span>
+        <input type="range" id="cfgCortesCena" min="1" max="6" step="1" value="3">
+        <span class="config-value" id="valCortesCena">3</span>
+      </label>
+
+      <label class="config-item">
+        <span class="config-label">Duração de cada clipe</span>
+        <input type="range" id="cfgDuracao" min="15" max="90" step="5" value="45">
+        <span class="config-value" id="valDuracao">45s</span>
+      </label>
+
+      <label class="config-item">
+        <span class="config-label">Cooldown entre cortes</span>
+        <input type="range" id="cfgCooldown" min="10" max="60" step="5" value="30">
+        <span class="config-value" id="valCooldown">30s</span>
+      </label>
+
+      <label class="config-item">
+        <span class="config-label">Janela pra combinar sinais (vira "viral")</span>
+        <input type="range" id="cfgCombinacao" min="5" max="20" step="1" value="10">
+        <span class="config-value" id="valCombinacao">10s</span>
+      </label>
+
+      <label class="config-item">
+        <span class="config-label">Sensibilidade de chat <em>(mensagens/s acima da média)</em></span>
+        <input type="range" id="cfgSensibilidadeChat" min="1.2" max="4" step="0.1" value="2.5">
+        <span class="config-value" id="valSensibilidadeChat">2.5×</span>
+      </label>
+    </div>
+
+    <button class="btn btn-primary btn-lg" id="btnAnalisar" type="button">
+      <span class="btn-icon">⚡</span> Analisar vídeo
+    </button>
+  </section>
+
+  <!-- STATUS / LOG -->
+  <section class="panel" id="painelStatus" hidden>
+    <div class="progress-track">
+      <div class="progress-fill" id="progressFill"></div>
+    </div>
+    <p class="progress-label" id="progressLabel">Preparando…</p>
+    <div class="log" id="log"></div>
+  </section>
+
+  <!-- RESULTADOS -->
+  <section class="panel" id="painelResultados" hidden>
+    <div class="results-header">
+      <h2 class="panel-title">Cortes encontrados</h2>
+      <span class="results-count" id="resultsCount">0 cortes</span>
+    </div>
+    <div class="results-grid" id="resultsGrid"></div>
+  </section>
+
+  <section class="panel empty-state" id="painelVazio" hidden>
+    <p>Nenhum corte passou dos limiares atuais.</p>
+    <p class="empty-sub">Diminui a sensibilidade de áudio ou a agitação de cena mínima e tenta de novo.</p>
+  </section>
+
+</main>
+
+<footer>
+  <p>AI Cutter Web — mesmo motor de detecção do app desktop, rodando 100% no seu navegador. Nenhum vídeo é enviado a servidor nenhum.</p>
+</footer>
+
+<canvas id="canvasOculto" hidden></canvas>
+<video id="videoOculto" hidden muted playsinline></video>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/hls.js/1.5.15/hls.min.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
